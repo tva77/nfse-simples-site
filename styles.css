@@ -305,6 +305,10 @@ p {
 }
 
 .site-footer p {
+  margin: 0 0 0.5rem;
+}
+
+.site-footer p:last-child {
   margin: 0;
 }
 
