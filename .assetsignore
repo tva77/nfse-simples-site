@@ -1,1 +1,16 @@
+# Oversized installer — exceeds 25 MiB asset limit
 assets/*.exe
+
+# Not web assets
+.git
+.gitignore
+.gitattributes
+wrangler.jsonc
+wrangler.toml
+package.json
+package-lock.json
+node_modules
+.wrangler
+.dev.vars
+.DS_Store
+Thumbs.db
