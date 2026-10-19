@@ -1,5 +1,5 @@
 # Oversized installer — exceeds 25 MiB asset limit
-assets/*.exe
+assets/*.zip
 
 # Not web assets
 .git
