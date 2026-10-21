@@ -1,6 +1,6 @@
 # Oversized installer — exceeds 25 MiB asset limit
 assets/*.zip
-
+assets/*.dmg
 # Not web assets
 .git
 .gitignore
