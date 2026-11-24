@@ -1,0 +1,111 @@
+name: send-release-notice
+
+on:
+  push:
+    branches: [main]
+    paths: ['release.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: send-release-notice
+  cancel-in-progress: false
+
+jobs:
+  queue-automation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verificar mudanca de versao
+        id: version
+        run: |
+          current="$(jq -r .version release.json)"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Dispatch manual: enviando aviso da versao $current."
+            exit 0
+          fi
+          previous="$(git show HEAD~1:release.json 2>/dev/null | jq -r .version 2>/dev/null || true)"
+          if [ "$current" = "$previous" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Versao $current inalterada em relacao ao commit anterior; nada a enviar."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Versao mudou de '${previous:-<nova>}' para $current."
+          fi
+
+      - name: Enfileirar contatos inscritos na automacao
+        if: steps.version.outputs.changed == 'true'
+        env:
+          EO_API_KEY: ${{ secrets.EMAILOCTOPUS_API_KEY }}
+          EO_LIST_ID: ${{ vars.EMAILOCTOPUS_LIST_ID }}
+          EO_AUTOMATION_ID: ${{ vars.EMAILOCTOPUS_AUTOMATION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$EO_API_KEY" ] || [ -z "$EO_LIST_ID" ] || [ -z "$EO_AUTOMATION_ID" ]; then
+            echo "::error::Defina o secret EMAILOCTOPUS_API_KEY e as variables EMAILOCTOPUS_LIST_ID e EMAILOCTOPUS_AUTOMATION_ID no repositorio."
+            exit 1
+          fi
+
+          base="https://api.emailoctopus.com"
+          auth="Authorization: Bearer $EO_API_KEY"
+          tmp="$(mktemp)"
+          queued=0; skipped=0; failed=0
+          starting_after=""
+
+          # 0 = enfileirado, 2 = ja estava na automacao, 1 = falha
+          queue_contact() {
+            local id="$1" attempt code
+            for attempt in 1 2 3; do
+              code="$(curl -sS -o "$tmp" -w '%{http_code}' \
+                -X POST -H "$auth" -H 'Content-Type: application/json' \
+                -d "{\"contact_id\":\"$id\"}" \
+                "$base/automations/$EO_AUTOMATION_ID/queue")" || code=000
+              case "$code" in
+                204) return 0 ;;
+                409) return 2 ;;
+                429|000|5*) sleep $((attempt * 10)) ;;
+                *)
+                  echo "::warning::HTTP $code ao enfileirar $id: $(cat "$tmp")"
+                  return 1 ;;
+              esac
+            done
+            echo "::warning::HTTP $code persistente ao enfileirar $id"
+            return 1
+          }
+
+          while :; do
+            args=(-G -H "$auth" "$base/lists/$EO_LIST_ID/contacts"
+              --data-urlencode 'status=subscribed'
+              --data-urlencode 'limit=100')
+            [ -n "$starting_after" ] && args+=(--data-urlencode "starting_after=$starting_after")
+            if ! page="$(curl -sfS "${args[@]}")"; then
+              echo "::error::Falha ao listar contatos da lista."
+              exit 1
+            fi
+            while IFS= read -r id; do
+              [ -n "$id" ] || continue
+              if queue_contact "$id"; then
+                queued=$((queued + 1))
+              else
+                rc=$?
+                if [ "$rc" -eq 2 ]; then
+                  skipped=$((skipped + 1))
+                else
+                  failed=$((failed + 1))
+                fi
+              fi
+              sleep 0.2
+            done < <(echo "$page" | jq -r '.data[].id')
+            starting_after="$(echo "$page" | jq -r '.paging.next.starting_after // empty')"
+            [ -n "$starting_after" ] || break
+          done
+
+          rm -f "$tmp"
+          echo "Enfileirados: $queued | Ja na automacao: $skipped | Falhas: $failed"
+          [ "$failed" -eq 0 ]

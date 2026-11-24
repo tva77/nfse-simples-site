@@ -3,6 +3,7 @@ assets/*.zip
 assets/*.dmg
 # Not web assets
 .git
+.github
 .gitignore
 .gitattributes
 wrangler.jsonc

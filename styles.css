@@ -297,6 +297,14 @@ p {
   margin-bottom: 0.75rem;
 }
 
+.signup-embed {
+  max-width: 34rem;
+}
+
+.signup-embed iframe {
+  width: 100%;
+}
+
 .site-footer {
   border-top: 1px solid var(--outline);
   padding: 2rem 0;
